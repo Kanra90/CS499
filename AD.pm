@@ -29,220 +29,239 @@ sub disable {
 
 	($disable) = @_;
 }
-
-################################
-# Open directory (ldap) handle #
-################################
+
+# Variables for _directory
 
 my $ldap;
 my $ldap_dc;
 my $lockoutduration;
 
-sub _directory {
+# _directory opens an LDAP directory handle.
+# Parameters:
+# None
+# Returns:
+# 1. String - If LDAP cannot be reached.
+# 2. String - If the file containing the password cannot be read.
+# 3. String - If the bind request failed.
+# 4. Net::LDAPS - Otherwise, it returns the directory handle.
 
-	if (! $ldap) {
-
-		foreach my $controller (@CONTROLLERS) {
-			if ($ldap = Net::LDAPS->new("$controller.$WINDOMAIN", timeout => 10,
-						    raw => qr/(?i:^jpegPhoto|;binary)/)) {
+sub _directory
+{
+# Attempts to open a directory handle if there is not one already.
+	if (!$ldap)
+	{
+# Finds the first working controller and opens a handle. They are assigned to $ldap_dc and $ldap. Otherwise returns an error.
+		foreach my $controller (@CONTROLLERS)
+		{
+			if ($ldap = Net::LDAPS->new("$controller.$WINDOMAIN", timeout => 10, raw => qr/(?i:^jpegPhoto|;binary)/))
+			{
 				$ldap_dc = $controller;
 				last;
 			}
 		}
-		$ldap or
-			return Identity::log("error opening directory: $@");
-
-		open(PASSWORD, '/etc/security/secrets/cppad-idmgmt') or
-			return Identity::log('error: ldap login unauthorized');
-
+		$ldap or return Identity::log("error opening directory: $@");
+# Gets the password or returns an error.
+		open(PASSWORD, '/etc/security/secrets/cppad-idmgmt') or return Identity::log('error: ldap login unauthorized');
 		my $password = <PASSWORD>;
 		close(PASSWORD);
 		chop($password);
-
-		my $status = $ldap->bind(
-			"$DN=it_svc_idmgmt,OU=service,$BASE",
-			password => $password,
-		); $status->code() and do {
+# Sends a bind request. Returns an error on fail.
+		my $status = $ldap->bind("$DN=it_svc_idmgmt,OU=service,$BASE", password => $password,);
+		$status->code() and do
+		{
 			$ldap_dc = undef;
 			return Identity::log('error binding to directory: ' . $status->error());
-			};
-
-		my $search = $ldap->search(
-			scope  => 'base',
-			base   => "$BASE",
-			filter => "(objectclass=*)",
-			attrs  => [ 'lockoutDuration' ]
-		);
-
-		if ($search->code()) {
-			Identity::log("warning: failed to lookup base object: "
-				. $search->error() . ' (' . $search->code() . ')');
+		};
+# Searches the directory for entries containing lockoutDuration. Logs an error if searching failed or there are no entries. Otherwise, gets the first lockoutDuration.
+		my $search = $ldap->search(scope => 'base', base => "$BASE", filter => "(objectclass=*)", attrs  => [ 'lockoutDuration' ]);
+		if ($search->code())
+		{
+			Identity::log("warning: failed to lookup base object: " . $search->error() . ' (' . $search->code() . ')');
 		}
-		elsif (defined(my $entry = $search->shift_entry())) {
+		elsif (defined(my $entry = $search->shift_entry()))
+		{
 			$lockoutduration = $entry->get_value('lockoutDuration');
 			$lockoutduration = -($lockoutduration/10000000);
 		}
-		else {
+		else
+		{
 			Identity::log('warning: base object search returned no entries');
 		}
 	}
 	return $ldap;
 }
-
-##############################
-# Search for directory entry #
-##############################
 
-my $ATTRS = [
-	'accountExpires',
-	'department',
-	'description',
-	'displayName',
-	'extensionAttribute12',
-	'facsimileTelephoneNumber',
-	'givenName',
-	'homeDirectory',
-	'initials',
-	'lockoutTime',
-	'mail',
-	'mailNickname',
-	'physicalDeliveryOfficeName',
-	'proxyAddresses',
-	'pwdLastSet',
-	'sn',
-	'targetAddress',
-	'telephoneNumber',
-	'title',
-	'userAccountControl',
-	'whenCreated',
-	'calstateEduPersonEmplid',
-	'calstateEduPersonRestrictFlag',
-	'cppEduPersonAffiliation',
-	'cppGroupRestrictFlag',
-	'cppGroupPopulation',
+# Variables for _entry
+my $ATTRS =
+[
+'accountExpires',
+'department',
+'description',
+'displayName',
+'extensionAttribute12',
+'facsimileTelephoneNumber',
+'givenName',
+'homeDirectory',
+'initials',
+'lockoutTime',
+'mail',
+'mailNickname',
+'physicalDeliveryOfficeName',
+'proxyAddresses',
+'pwdLastSet',
+'sn',
+'targetAddress',
+'telephoneNumber',
+'title',
+'userAccountControl',
+'whenCreated',
+'calstateEduPersonEmplid',
+'calstateEduPersonRestrictFlag',
+'cppEduPersonAffiliation',
+'cppGroupRestrictFlag',
+'cppGroupPopulation',
 ];
 
-my %ldap_retry_errors = (
-	0x01 => 1,
-	0x33 => 1,
-	0x34 => 1,
-	0x50 => 1,
-	0x51 => 1,
-	0x52 => 1,
-	0x55 => 1,
-	0x5b => 1,
+my %ldap_retry_errors =
+(
+0x01 => 1,
+0x33 => 1,
+0x34 => 1,
+0x50 => 1,
+0x51 => 1,
+0x52 => 1,
+0x55 => 1,
+0x5b => 1,
 );
-
-sub _entry {
 
+# _entry searches for a directory entry.
+# Parameters:
+# 1. Reference to Identity object
+# 2. String or reference to array of strings - An attribute
+# 3. String - An attribute like "groupmail".
+# Returns:
+# 1. String - An error message.
+# 2. Net::LDAP::Entry
+
+
+sub _entry
+{
 	my ($entity, $attrs, $ou) = @_;
-
 	my $name = $entity->{name};
 	my $type = $entity->{'-type'};
 	$ou ||= $type;
-
 	my $entry;
+# If $attrs is a reference, execute the if statement. Otherwise, return a field from the entity.
 	$entry = $entity->{"-ad_${ou}_entry"} unless ref($attrs);
-
-	if (! $entry) {
-		$ldap = _directory(); ref($ldap) or return $ldap;
-
-		my $search = $ldap->search(
-			scope  => 'sub',
-			base   => "OU=$ou,$BASE",
+	if (!$entry)
+	{
+# Get a directory handle or return an error.
+		$ldap = _directory();
+		ref($ldap) or return $ldap;
+# Searches the directory.
+		my $search = $ldap->search
+		(
+			scope => 'sub',
+			base => "OU=$ou,$BASE",
 			filter => "($DN=$name" . ($ou eq 'groupmail' && '-mbx') . ')',
-			attrs  => ref($attrs) ? $attrs : $ATTRS,
+			attrs => ref($attrs) ? $attrs : $ATTRS,
 		);
-
-		if ($search->code() && defined($ldap_retry_errors{$search->code()})) {
-			$ldap = $ldap_dc = undef; $ldap = _directory(); ref($ldap) or return $ldap;
-
-			$search = $ldap->search(
-				scope  => 'sub',
-				base   => "OU=$ou,$BASE",
+# If the search is not a success and is one of the retry errors, then try another directory handle and run the search again.
+		if ($search->code() && defined($ldap_retry_errors{$search->code()}))
+		{
+			$ldap = $ldap_dc = undef;
+			$ldap = _directory();
+			ref($ldap) or return $ldap;
+			$search = $ldap->search
+			(
+				scope => 'sub',
+				base => "OU=$ou,$BASE",
 				filter => "($DN=$name" . ($ou eq 'groupmail' && '-mbx') . ')',
-				attrs  => ref($attrs) ? $attrs : $ATTRS,
+				attrs => ref($attrs) ? $attrs : $ATTRS,
 			);
 		}
-		$search->code() and
-			return Identity::log("error getting $ou $name entry: " . $search->error() . ' (' . $search->code() . ')');
-
-		$entry = $search->shift_entry() or
-			return "$name is not an existing $ou";
-
+# If the search fails or returns empty, return an error message. Or update the property in $entity if $attrs is not reference.
+		$search->code() and return Identity::log("error getting $ou $name entry: " . $search->error() . ' (' . $search->code() . ')');
+		$entry = $search->shift_entry() or return "$name is not an existing $ou";
 		$entity->{"-ad_${ou}_entry"} = $entry unless ref($attrs);
 	}
 	return $entry;
 }
 
-sub _update {
-
+# _update updates an entry in a directory.
+# Parameters:
+# 1. Net::LDAP::Entry
+# Returns:
+# 1. String - An error if connection fails.
+# 2. String - Update fails.
+# 3. undef - If successful.
+sub _update
+{
 	my ($entry) = @_;
-
 	my $status;
 	my $try = 1;
-
-	while(1) {
-		$ldap = _directory(); ref($ldap) or return $ldap;
-
+# Try to update until:
+	while (1)
+	{
+# Connecting to directory failed.
+		$ldap = _directory();
+		ref($ldap) or return $ldap;
 		$status = $entry->update($ldap);
-
+# Updating is a success or the error is serious.
 		last unless ($status->code() && defined($ldap_retry_errors{$status->code()}));
-
-		$ldap = undef; last unless ($try < $MAX_RETRIES);
-
+		$ldap = undef;
+# Too many update failures.
+		last unless ($try < $MAX_RETRIES);
 		Identity::log("warning: retryable update failure " . $status->error() . ' (' . $status->code() . ')');
-
-		sleep($try * $RETRY_SLEEP); $try++;
+		sleep($try * $RETRY_SLEEP);
+		$try++;
 	};
-
 	return ($status->code() ? $status->error() . ' (' . $status->code() . ')' : undef);
 }
-
-########################
-# Create user or group #
-########################
 
-sub create {
-
+# Create user or group
+# Parameters:
+# $entity - A user or group object reference used as basis.
+# Returns:
+# void - If disabled or successful.
+# string - If cannot connect to directory or if updating failed.
+sub create
+{
 	my ($entity) = @_;
-
 	my $name     = $entity->{name};
 	my $type     = $entity->{'-type'};
 	my $title    = $entity->{title};
 	my $phone    = $entity->{phone};
 	my $fax      = $entity->{fax};
 	my $location = $entity->{location};
-
+# Creates an Entry object based on the $entity parameter.
 	my $entry = Net::LDAP::Entry->new();
-
 	$entry->dn("$DN=$name,ou=$type,$BASE");
-
 	$entry->add(displayName => $title);
-	if ($type eq 'user') {
-
+# If it is a user, fill in relevant information.
+	if ($type eq 'user')
+	{
 		my $last_name  = $entity->{last_name};
 		my $first_name = $entity->{first_name};
 		my $mi         = $entity->{mi};
 		my $position   = $entity->{position};
 		my $emplid     = $entity->{emplid};
 		my $ferpa      = $entity->{ferpa};
-
 		($first_name, $mi) = $first_name =~ /\.$/ ? ($mi, undef) : ($first_name, substr($mi, 0, 1) . '.') if length($mi) > 6;
-
-		$entry->add(
-			objectClass        => ['top','person','organizationalPerson','user'],
-			$DN                => $name,
-			sn                 => $last_name,
-			mail               => "$name\@$DOMAIN",
-			wWWHomePage        => "http://www.$DOMAIN/~$name/",
-			homeDirectory      => "\\\\files.$DOMAIN\\user\\$name",
-			homeDrive	   => 'Z:',
-			sAMAccountName     => $name,
-			userPrincipalName  => "$name\@$DOMAIN",
-			unicodePwd         => [ join("\0", split(//, "\"$entity->{password}\"")) . "\0" ],
-			userAccountControl => '546',
-			accountExpires     => 0,
+		$entry->add
+		(
+			objectClass			=> ['top','person','organizationalPerson','user'],
+			$DN					=> $name,
+			sn					=> $last_name,
+			mail				=> "$name\@$DOMAIN",
+			wWWHomePage			=> "http://www.$DOMAIN/~$name/",
+			homeDirectory		=> "\\\\files.$DOMAIN\\user\\$name",
+			homeDrive			=> 'Z:',
+			sAMAccountName		=> $name,
+			userPrincipalName	=> "$name\@$DOMAIN",
+			unicodePwd			=> [ join("\0", split(//, "\"$entity->{password}\"")) . "\0" ],
+			userAccountControl	=> '546',
+			accountExpires		=> 0,
 		);
 		$entry->add(givenName => $first_name)    if $first_name;
 		$entry->add(initials  => $mi)            if $mi;
@@ -250,101 +269,98 @@ sub create {
 		$entry->add(calstateEduPersonEmplid       => $emplid)     if $emplid;
 		$entry->add(calstateEduPersonRestrictFlag => $ferpa)      if $ferpa;
 	}
-	else {
+# If not a user, then add relevant information to the Entry object.
+	else
+	{
 		my $visibility = $entity->{visibility} || 'public';
 		my $population = $entity->{population};
-
-		$entry->add(
+		$entry->add
+		(
 			objectClass    => ['top', 'group'],
 			sAMAccountName => $name,
 			description    => $title,
-			cppGroupPopulation => $population, 
+			cppGroupPopulation => $population,
 			# Universal security group, hardcoded constants woo woo
 			groupType => '-2147483640',
 		);
 		$entry->add(cppGroupRestrictFlag => 'member') if $visibility eq 'private';
 	}
+# Add common information.
 	$entry->add(telephoneNumber            => $phone->[0])    if $phone;
 	$entry->add(facsimileTelephoneNumber   => $fax->[0])      if $fax;
 	$entry->add(physicalDeliveryOfficeName => $location->[0]) if $location;
-
+# If not disabled and can connect to directory, continue.
 	return if $disable =~ /r/;
-
 	$ldap = _directory(); ref($ldap) or return $ldap;
-
 	return if $disable =~ /w/;
-
+# Add entry or return error.
 	my $status = _update($entry); $status and
-		return Identity::log("error adding $type $name to directory: $status");
-
+	return Identity::log("error adding $type $name to directory: $status");
+# Set Entry object as property of entity and return void.
 	$entity->{'-ad_entry'} = $entry;
-
 	return;
 }
-
-########################
-# Delete user or group #
-########################
 
-sub delete {
-
+# Delete user or group
+# Parameters:
+# $entity - Identity object reference
+# Returns:
+# void - If disabled or successful.
+# string - Error messages from getting an Entry or updating.
+sub delete
+{
 	my ($entity) = @_;
-
 	my $name = $entity->{name};
 	my $type = $entity->{'-type'};
-
 	return if $disable =~ /r/;
-
+# Get the entry or return an error.
 	my $entry           = _entry($entity); ref($entry) or return $entry;
+# Get the groupmail entry.
 	my $groupmail_entry = $type eq 'group' && _entry($entity, undef, 'groupmail');
-
 	return if $disable =~ /w/;
-
+# Deletes the entry and updates the directory or returns an error.
 	$entry->delete();
-
-	my $status = _update($entry); $status and
-		return Identity::log("error deleting $type $name: $status");
-
-	if (ref($groupmail_entry)) {
+	my $status = _update($entry);
+	$status and return Identity::log("error deleting $type $name: $status");
+# Deletes the groupmail entry and updates or returns an error.
+	if (ref($groupmail_entry))
+	{
 		$groupmail_entry->delete();
-
-		$status = _update($groupmail_entry) and
-			return Identity::log("error deleting $type $name mailbox: $status");
+		$status = _update($groupmail_entry) and return Identity::log("error deleting $type $name mailbox: $status");
 	}
-	
 	return;
 }
-
-#########################
-# Store user department #
-#########################
 
+# Store user department
+# Parameters:
+# Returns:
+# void - If successful or disabled.
+# string - Error messages from getting an entry or writing to the server.
 sub department {
 
 	my ($user, $new_department) = @_;
 
 	return if $disable =~ /r/;
-
+# Get the directory entry or return an error. Then get the attribute.
 	my $entry = _entry($user); ref($entry) or return $entry;
 
 	my $department = $entry->get_value('department', asref => 1);
-
+# If the new one and the old one are not the same:
 	if ($new_department and ($department xor @$new_department) || $department->[0] ne $new_department->[0]) {
 
 		my $name = $user->{name};
-
+# Replace the attribute and logs a message.
 		Identity::log("store user $name department $new_department->[0] (was " . ($department && $department->[0]) . ')');
 
 		$entry->replace(department => @$new_department ? $new_department->[0] : []);
-
+# If the server is not disabled, update it or return an error.
 		return if $disable =~ /w/;
 
-		my $status = _update($entry); $status and
-			return Identity::log("error storing user $name department: $status");
+		my $status = _update($entry); $status and return Identity::log("error storing user $name department: $status");
 	}
 	return;
 }
-
+
 #######################
 # Store user disabled #
 #######################
@@ -1101,11 +1117,12 @@ sub visibility {
 	return;
 }
 
-
-################################
-# Fetch date of group creation #
-################################
-
+# create_date fetches date of group creation
+# Parameters:
+# $group - Group object reference
+# Returns:
+# void - If disabled or successful.
+# string - If entry or the attribute cannot be found. Or if the date attribute has an invalid format.
 sub create_date {
 
 	my ($group) = @_;
@@ -1129,58 +1146,58 @@ sub create_date {
 
 	return;
 }
-
-###################################
-# Store or fetch user affiliation #
-###################################
 
-sub affiliation {
-
+# Store or fetch user affiliation
+# Parameters:
+# $user - Reference of User object.
+# $new_affiliation - Reference of array of strings - If defined, appends the strings to the attribute.
+# Returns:
+# 1. void - If the module is disabled for writing or reading. Or if successful.
+# 2. string - Error message if the corresponding entry in the directory cannot be found. Or failed to update.
+sub affiliation
+{
 	my ($user, $new_affiliation) = @_;
-
 	return if $disable =~ /r/;
-
-	my $entry = _entry($user); ref($entry) or return $entry;
-
+# Gets an entry or returns an error.
+	my $entry = _entry($user);
+	ref($entry) or return $entry;
 	my $affiliation = $entry->get_value('cppEduPersonAffiliation', asref => 1);
-
-	if (defined($new_affiliation)) {
-
+# Adds $new_affiliation strings to the entry.
+	if (defined($new_affiliation))
+	{
+# Sorts and turns the arrays from the attribute and argument into strings.
 		my $affiliation_string = defined($affiliation) && join(',', sort(@$affiliation));
 		my $new_affiliation_string = defined($new_affiliation) && join(',', sort(@$new_affiliation));
-
-		if ($new_affiliation_string ne $affiliation_string) {
-
+		if ($new_affiliation_string ne $affiliation_string)
+		{
 			my $name = $user->{name};
-
 			my @eduPersonAffiliation;
 			my $eduPersonPrimaryAffiliation;
-
-			foreach my $eduPersonAffiliation ('faculty', 'staff', 'employee', 'student', 'member', 'affiliate') {
-
-				if (grep($_ eq $eduPersonAffiliation, @$new_affiliation)) {
+# If the strings are different and are these tags, then add it to the array.
+			foreach my $eduPersonAffiliation ('faculty', 'staff', 'employee', 'student', 'member', 'affiliate')
+			{
+				if (grep($_ eq $eduPersonAffiliation, @$new_affiliation))
+				{
 					push(@eduPersonAffiliation, $eduPersonAffiliation);
 					$eduPersonPrimaryAffiliation ||= $eduPersonAffiliation;
 				}
 			}
+# Update the entry object and then update the directory if not disabled.
 			$entry->replace(eduPersonAffiliation => \@eduPersonAffiliation);
 			$entry->replace(eduPersonPrimaryAffiliation => $eduPersonPrimaryAffiliation);
 			$entry->replace(cppEduPersonAffiliation => $new_affiliation);
-
 			Identity::log("store user $name affiliation $new_affiliation_string (was $affiliation_string)");
-
 			return if $disable =~ /w/;
-
-			my $status = _update($entry); $status and
-				return Identity::log("error storing user $name affiliation: " . $status);
-
+			my $status = _update($entry);
+			$status and return Identity::log("error storing user $name affiliation: " . $status);
 			$affiliation = $new_affiliation;
 		}
 	}
+# Update the field.
 	$user->{affiliation} = $affiliation if defined($affiliation);
 	return;
 }
-
+
 #####################
 # Store user emplid #
 #####################
