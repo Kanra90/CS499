@@ -982,17 +982,21 @@ sub mi {
 #########################
 # Store user first_name #
 #########################
-
+# Functionality: To store a new value for a user's first name.
+# Parameters: The affiliated user and its new first name.
+# Potential Values: None or a new first name.
+# Potential return values: No return possible, an error message, or a return of $entry in instance of an error.
+#########################
 sub first_name {
 
 	my ($user, $new_first_name) = @_;
 
 	return if $disable =~ /r/;
-
+#Retrieve the entry instance of the user or return error. Otherwise, retrieve first name attribute.
 	my $entry = _entry($user); ref($entry) or return $entry;
 
 	my $first_name = $entry->get_value('givenName');
-
+#End the subroutine if there is no new name. Otherwise proceed to fetch current name and change it.
 	if ($new_first_name && $new_first_name ne $first_name) {
 
 		my $name = $user->{name};
@@ -1000,7 +1004,7 @@ sub first_name {
 		Identity::log("store user $name first_name $new_first_name (was $first_name)");
 
 		$entry->replace(givenName => $new_first_name);
-
+#If writing is disabled, end the subroutine. If successful, status should be true. Otherwise return error message.
 		return if $disable =~ /w/;
 
 		my $status = _update($entry); $status and
@@ -1012,17 +1016,21 @@ sub first_name {
 ########################
 # Store user last_name #
 ########################
-
+# Functionality: To store a new last name for affiliated user.
+# Parameters: The affiliated user and its new last name.
+# Potential Values: None or a new last name.
+# Potential return values: No possible return, an error message, or a return of $entry in instance of error.
+########################
 sub last_name {
 
 	my ($user, $new_last_name) = @_;
 
 	return if $disable =~ /r/;
-
+#Retrieve the entry instance of the user. Then retrieve last name attribute. Otherwise return $entry error.
 	my $entry = _entry($user); ref($entry) or return $entry;
 
 	my $last_name = $entry->get_value('sn');
-
+#If new last name is valid, proceed to log and attempt changing the user's current last name.
 	if ($new_last_name && $new_last_name ne $last_name) {
 
 		my $name = $user->{name};
@@ -1030,7 +1038,7 @@ sub last_name {
 		Identity::log("store user $name last_name $new_last_name (was $last_name)");
 
 		$entry->replace(sn => $new_last_name);
-
+#If writing disabled, end subroutine. Otherwise attempt to update last name. If attempt failed, return error message.
 		return if $disable =~ /w/;
 
 		my $status = _update($entry); $status and
@@ -1042,7 +1050,11 @@ sub last_name {
 #############################
 # Store user or group title #
 #############################
-
+# Functionality: Stores/updates the title of a user/group with a new one.
+# Parameters: The affiliated user/group and the new title.
+# Potential Values: None, or a new title for groupmail, displayName, description, or the entity itself.
+# Potential return values: No possible return, $entry return in instance of error, or $error containing message of cause.
+#############################
 sub title {
 
 	my ($entity, $new_title) = @_;
@@ -1051,7 +1063,7 @@ sub title {
 	my $type = $entity->{'-type'};
 
 	return if $disable =~ /r/;
-
+#Retrieve the entry instance of the user/group and determine/retrieve the attribute title to be changed.
 	my $entry = _entry($entity); ref($entry) or return $entry;
 	my $groupmail_entry = $type eq 'group' && _entry($entity, undef, 'groupmail');
 	my $error;
@@ -1063,12 +1075,12 @@ sub title {
 		$entry->replace(displayName => $new_title);
 
 		Identity::log("store $type $name title $new_title (was $title)");
-
+#After changing the displayName title, cases for $type, $status, and $groupmail_entry are made to update if intended.
 		if ($type eq 'group') {
 			$entry->replace(description => $new_title);
 		}
 		return if $disable =~ /w/;
-
+#Running through the cases for changing 'group' and 'groupmail' and record any errors.
 		my $status = _update($entry); $status and
 			$error .= Identity::log("error storing $type $name title: $status");
 
@@ -1086,20 +1098,24 @@ sub title {
 ##########################
 # Store group visibility #
 ##########################
-
+# Functionality: To change/update the privacy(visibility) of a group.
+# Parameters: The affiliated group and visibility, private or public.
+# Potential Values: Private or public, or none.
+# Potential return values: No possible return, or return an error message.
+##########################
 sub visibility {
 	my ($group, $new_visibility) = @_;
 
 	return if $disable =~ /r/;
 
 	my $entry = _entry($group); ref($entry) or return $entry;
-
+#Perform grep search for the string of characters 'member' and retrieve the attribute value for group visibility.
 	my $visibility = grep($_ eq 'member', $entry->get_value('cppGroupRestrictFlag')) ? 'private' : 'public';
 
 	if ($new_visibility && $new_visibility ne $visibility) {
 
 		my $name = $group->{name};
-
+#Switching private to public or vice versa for the group's visibility by add/delete of attribute of $entry. Then logging the attempt.
 		if ($new_visibility eq 'private') {
 			$entry->add(cppGroupRestrictFlag => 'member');
 		}
@@ -1110,7 +1126,7 @@ sub visibility {
 		Identity::log("store group $name visibility $new_visibility (was $visibility)");
 
 		return if $disable =~ /w/;
-
+#If writing disabled, record the error into the log and end subroutine, otherwise prepare the new value.
 		my $status = _update($entry); $status and
 			return Identity::log("error storing group $name visibility: " . $status);
 
@@ -1206,7 +1222,11 @@ sub affiliation
 #####################
 # Store user emplid #
 #####################
-
+# Functionality: Storing/updating the emplid(broncoNumber) of the affiliated user.
+# Parameters: The affiliated user and a new emplid.
+# Potential Values: None or a new emplid.
+# Potential return values: No possible return, or return error message.
+#####################
 sub emplid {
 
 	my ($user, $new_emplid) = @_;
@@ -1220,14 +1240,14 @@ sub emplid {
 	if (defined($new_emplid) && $emplid ne $new_emplid) {
 
 		my $name = $user->{name};
-
+#If the new broncoNumber is not empty, replace the current number with the new one. Otherwise delete the invalid value.
 		if ($new_emplid ne '') {
 			$entry->replace(calstateEduPersonEmplid => $new_emplid);
 		}
 		else {
 			$entry->delete('calstateEduPersonEmplid');
 		}
-
+#Log the attempt and if writing is disabled, return. Otherwise proceed and check the $status and return error if found.
 		Identity::log("store user $name emplid $new_emplid (was $emplid)");
 
 		return if $disable =~ /w/;
@@ -1242,7 +1262,11 @@ sub emplid {
 #############################
 # Store or fetch user ferpa #
 #############################
-
+# Functionality: Change/update the affiliated user's ferpa attribute.
+# Parameters: The affiliated user and a new ferpa value.
+# Potential Values: Ferpa may contain a string value.
+# Potential return values: No possible return or an error message.
+#############################
 sub ferpa {
 
 	my ($user, $new_ferpa) = @_;
@@ -1256,14 +1280,15 @@ sub ferpa {
 	if (defined($new_ferpa) && $ferpa ne $new_ferpa) {
 
 		my $name = $user->{name};
-
+#If the new value of ferpa is not an empty string, replace the value otherwise delete the current value.
 		if ($new_ferpa ne '') {
 			$entry->replace(calstateEduPersonRestrictFlag => $new_ferpa);
 		}
 		else {
 			$entry->delete('calstateEduPersonRestrictFlag');
 		}
-
+#Log in the attempt and return if writing disabled. Otherwise proceed to check for an error in the status and return it.
+#If no error found, proceed to change the ferpa and store it in the user's data.
 		Identity::log("store user $name ferpa $new_ferpa (was $ferpa)");
 
 		return if $disable =~ /w/;
@@ -1280,7 +1305,11 @@ sub ferpa {
 ###################################
 # Store or fetch group population #
 ###################################
-
+# Functionality: Retrieve or change/update the population value of an affiliated group.
+# Parameters: The affiliated group and the new population value.
+# Potential Values: No value or a new value for population.
+# Potential return values: No return, $entry as instance of an error, or an error message. An update to the $group population value.
+###################################
 sub population {
 
 	my ($group, $new_population) = @_;
@@ -1292,13 +1321,13 @@ sub population {
 	my $population = $entry->get_value('cppGroupPopulation');
 
 	if ($new_population && $new_population ne $population) {
-
+#Name of group retrieved for log message. Group population in $entry changed.
 		my $name = $group->{name};
 
 		$entry->replace(cppGroupPopulation => $new_population);
 
 		Identity::log("store group $name population $new_population (was $population)");
-
+#If writing is disabled or error found, subroutine returns. If no errors, the change proceeds outside conditional statement.
 		return if $disable =~ /w/;
 
 		my $status = _update($entry); $status and
@@ -1314,13 +1343,17 @@ sub population {
 ###############################
 # Fetch user or group o365mbx #
 ###############################
-
+# Functionality: Retrieves the user/group's o365mbx value(Microsoft's Office 365 Mailbox).
+# Parameters: The affiliated user/group.
+# Potential Values: The instance of the user/group's o365mbx.
+# Potential return values: No possible return or an update to the value of o365mbx for affiliated user/group (true if found).
+###############################
 sub o365mbx {
 
 	my ($entity) = @_;
 
 	return if $disable =~ /r/;
-
+#Retrieve the instance of o365mbx through the $entry for the affiliated user/group. If found, set o365mbx value to true.
 	my $entry = _entry($entity); ref($entry) or return $entry;
 
 	my $o365mbx = $entry->get_value('extensionAttribute12');
