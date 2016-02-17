@@ -569,15 +569,15 @@ sub fax {
 sub homedir {
 
 	my ($user, $new_homedir) = @_;
-
+#returns if disable is true.
 	return if $disable =~ /r/;
-
+# Get the directory entry or return an error. Then get the attribute.
 	my $entry = _entry($user); ref($entry) or return $entry;
-
+#Get the homeDirectory from entry.
 	my $homedir = $entry->get_value('homeDirectory');
-
+#get name from user.
 	my $name = $user->{name};
-
+#if new homedir has value check file type and set according to winfile,zfs,orzfsraw.else return eroor 
 	if ($new_homedir) {
 		if ($new_homedir eq 'winfile') {
 			$new_homedir = "\\\\files.win.$DOMAIN\\user\\$name";
@@ -595,20 +595,21 @@ sub homedir {
 			return Identity::log("error: invalid homedir $new_homedir");
 		}
 	}
-
+#if both the homedir not equal to new_homedir then continue
 	if ($new_homedir and $homedir ne $new_homedir) {
 
 		$entry->replace(homeDirectory => $new_homedir);
-
+#log user's new homedir
 		Identity::log("store user $name homedir $new_homedir (was $homedir)");
-
+#If not disabled update 
 		return if $disable =~ /w/;
-
+#else send error if disabled and returns identity log.
 		my $status = _update($entry); $status and
 			return Identity::log("error storing user $name homedir: $status");
-
+#homedir is set to new one
 		$homedir = $new_homedir;
 	}
+#assign user's homedir to correct homedir.
 	$user->{homedir} = $homedir if defined($homedir);
 	return;
 }
@@ -620,24 +621,25 @@ sub homedir {
 sub location {
 
 	my ($entity, $new_location) = @_;
-
+#returns if disable is true
 	return if $disable =~ /r/;
-
+# Get the directory entry or return an error. Then get the attribute.
 	my $entry = _entry($entity); ref($entry) or return $entry;
-
+#set location to physicalDeliveryOfficeName in Directory entry
 	my $location = $entry->get_value('physicalDeliveryOfficeName', asref => 1);
-
+#if either new location and old location does not equal to new
+# OR locations first stored location do not equal continue else return
 	if ($new_location and ($location xor @$new_location) || $location->[0] ne $new_location->[0]) {
-
+# set name and type
 		my $name = $entity->{name};
 		my $type = $entity->{'-type'};
-
+#IDentity server log 
 		Identity::log("store $type $name location $new_location->[0] (was " . ($location && $location->[0]) . ')');
-
+#replace entry's PhysicalDeliveryOfficeName to new location
 		$entry->replace(physicalDeliveryOfficeName => @$new_location ? $new_location->[0] : []);
-
+#If not disabled update 
 		return if $disable =~ /w/;
-
+#else update status and return with Identity server log
 		my $status = _update($entry); $status and
 			return Identity::log("error storing $type $name location: $status");
 	}
@@ -651,21 +653,22 @@ sub location {
 sub members {
 
 	my ($group, $update_members) = @_;
-
+#set name of group,add array,remove array,populate. 
 	my $name     = $group->{name};
 	my $populate = $update_members->{populate};
 	my $remove   = $update_members->{remove};
 	my $add      = $update_members->{add};
-
+#if disabled return
 	return if $disable =~ /r/;
-
+# Get the directory entry or return an error. Then get the attribute.
 	my $entry = _entry($group); ref($entry) or return $entry;
-
+#declare memebers has and range array; set first
 	my %members;
 	my @range;
 	my $first = 0;
-
+#gets all memebers from said arrays
 	while (1) {
+
 		$range[0] = "member;range=$first-*";
 
 		my $entry = _entry($group, \@range); $entry or return $entry;
@@ -682,7 +685,7 @@ sub members {
 		last if $option !~ /^;range=(\d+)-(.+)$/i || $2 eq '*';
 		$first = $2 + 1;
 	}
-
+#populate new group
 	if ($populate) {
 		my (@remove, @add);
 
@@ -695,7 +698,7 @@ sub members {
 		($remove, $add) = (\@remove, \@add);
 	}
 	my $error;
-
+#remove users from group
 	if ($remove) {
 		my @remove_dn;
 
@@ -720,11 +723,12 @@ sub members {
 			}
 		}}
 	}
+#add users if they exist 
 	if ($add) {
 		my @add_dn;
 
 		foreach my $username (@$add) {
-
+#gets username of user and creates error message.
 			next if $members{$username};
 			$error .= Identity::log("error adding user $username to group $name: user doesn't exist") and
 				next if Identity::type($username) ne 'user';
@@ -732,9 +736,9 @@ sub members {
 			$members{$username} = 1;
 		}
 		if (@add_dn) {{
-
+#if added store log
 			Identity::log("store group $name members +" . @add_dn);
-
+$return if true.
 			last if $disable =~ /w/;
 
 			# Temporary kludge to work around broken SSL large updates
@@ -756,25 +760,28 @@ sub members {
 sub name {
 
 	my ($entity, $new_name) = @_;
-
+#set name and type from entity.
 	my $name = $entity->{name};
 	my $type = $entity->{'-type'};
-
+#Return if true.
 	return if $disable =~ /r/;
-
+# Get the directory entry or return an error. Then get the attribute.
 	my $entry           = _entry($entity); ref($entry) or return $entry;
 	my $groupmail_entry = $type eq 'group' && _entry($entity, undef, 'groupmail');
 	my $error;
-
+#Entry replaces sAMAccount name with new name.
 	$entry->replace(
 			sAMAccountName    => $new_name,
 	);
+#if entry mail exist replace with new name.
 	if ($entry->exists('mail')) {
 		$entry->replace(mail => "$new_name\@" . ($type eq 'group' && 'groups.') . $DOMAIN);
 	}
+#replace mail nickname if it exist with new name.	
 	if ($entry->exists('mailNickname')) {
 		$entry->replace(mailNickname => $new_name);
 	}
+#If address are being forwarded to this email change the forwards.
 	if ($entry->exists('proxyAddresses')) {
 		foreach my $value ($entry->get_value('proxyAddresses')) {
 			if ($value =~ /^smtp:$name@/i) {
@@ -785,22 +792,22 @@ sub name {
 			}
 		}
 	}
-
+#if type is a user change homedirectory
 	if ($type eq 'user') {
 		my $home_directory = $entry->get_value('homeDirectory');
 		$home_directory =~ s/$name$/$new_name/;
-		
+# replace entry attributes		
 		$entry->replace(
 				homeDirectory     => $home_directory,
 				userPrincipalName => "$new_name\@$DOMAIN",
 			        wWWHomePage       => "http://www.$DOMAIN/~$new_name/",
 				);
-		
+#Replace email in directory entry.		
 		if ($entry->exists('targetAddress')) {
 			$entry->replace(targetAddress => "SMTP:$new_name\@livecsupomona.mail.onmicrosoft.com");
 		}
 	}
-
+#If group then groupmail's directory entry will replace attributes
 	if (ref($groupmail_entry)) {
 		$groupmail_entry->replace(
 				mail              => "$new_name\@$DOMAIN",
@@ -809,7 +816,7 @@ sub name {
 				userPrincipalName => "${new_name}-mbx\@$DOMAIN",
 				targetAddress => "SMTP:$new_name\@livecsupomona.mail.onmicrosoft.com",
 				);
-
+#Finds proxy adress for email and logs it,then deletes old one and replaces. If statement checks smtp mail server type
 		foreach my $value ($groupmail_entry->get_value('proxyAddresses')) {
 		Identity::log("Found proxy address $value");
 			if ($value =~ /^smtp:$name@/i) {
@@ -826,20 +833,20 @@ sub name {
 			}
 		}
 	}
-		
+#return if disable is true.		
 	return if $disable =~ /w/;
-
+#check status and creates error message and and log. 
 	my $status = _update($entry); $status and
 		$error .= Identity::log("error renaming $type $name to $new_name: $status");
-
+#gets LDAP entry and tries to replace it and checks for if not error and deletes.
 	$status = $ldap->moddn($entry->dn(),
 		newrdn       => "$DN=$new_name",
 		deleteoldrdn => 1,
 	); $status->code() and
 		$error .= Identity::log("error renaming $type $name DN to $new_name: " . $status->error());
-
+ 
 	delete($entity->{"-ad_${type}_entry"});
-
+#if groupmail then checks status and creates error. Same as user above.
 	if (ref($groupmail_entry)) {
 	
 		my $status = _update($groupmail_entry); $status and
@@ -864,19 +871,19 @@ sub name {
 sub password {
 
 	my ($user, $new_password) = @_;
-
+#returns if disable is true.
 	return if $disable =~ /r/;
-
+# Get the directory entry or return an error. Then get the attribute.
 	my $entry = _entry($user); ref($entry) or return $entry;
-
+#replace entry password
 	$entry->replace('unicodePwd' => [ join("\0", split(//, "\"$new_password\"")) . "\0" ]);
-
+#gets user name
 	my $name = $user->{name};
-
+#log in identity server new password
 	Identity::log("store user $name password");
-
+#returns true if disable false.
 	return if $disable =~ /w/;
-
+#else check status and return with error log.
 	my $status = _update($entry); $status and
 		return Identity::log("error storing user $name password: $status");
 
@@ -890,24 +897,24 @@ sub password {
 sub phone {
 
 	my ($entity, $new_phone) = @_;
-
+#return disable is true
 	return if $disable =~ /r/;
-
+# Get the directory entry or return an error. Then get the attribute.
 	my $entry = _entry($entity); ref($entry) or return $entry;
-
+#get phone from entry.
 	my $phone = $entry->get_value('telephoneNumber', asref => 1);
-
+#if new_phone does not match phone or first of phone arrays dont match continue else return
 	if ($new_phone and ($phone xor @$new_phone) || $phone->[0] ne $new_phone->[0]) {
-
+#gets entity name and type
 		my $name = $entity->{name};
 		my $type = $entity->{'-type'};
-
+#logs new phone and old phone in identity server
 		Identity::log("store $type $name phone $new_phone->[0] (was " . ($phone && $phone->[0]) . ')');
-
+#directory entry replace number with new number
 		$entry->replace(telephoneNumber => @$new_phone ? $new_phone->[0] : []);
-
+#Return if disable is false
 		return if $disable =~ /w/;
-
+#update status and returns log if disable is true
 		my $status = _update($entry); $status and
 			return Identity::log("error storing $type $name phone: $status");
 	}
@@ -921,23 +928,23 @@ sub phone {
 sub position {
 
 	my ($user, $new_position) = @_;
-
+#Retruns if disable is true
 	return if $disable =~ /r/;
-
+# Get the directory entry or return an error. Then get the attribute.
 	my $entry = _entry($user); ref($entry) or return $entry;
-
+#get title from entry
 	my $position = $entry->get_value('title', asref => 1);
-
+#if new position does not equal old and exist or new and old position arrays do not match continue else return.
 	if ($new_position and ($position xor @$new_position) || $position->[0] ne $new_position->[0]) {
-
+#set user name
 		my $name = $user->{name};
-
+#Logs on identity server that new position is stored
 		Identity::log("store user $name position $new_position->[0] (was " . ($position && $position->[0]) . ')');
-
+#replace in directory
 		$entry->replace(title => @$new_position ? $new_position->[0] : []);
-
+#continue is disable is false 
 		return if $disable =~ /w/;
-
+#returns error if true
 		my $status = _update($entry); $status and
 			return Identity::log("error storing user $name position: $status");
 	}
@@ -953,21 +960,21 @@ sub mi {
 	my ($user, $new_mi) = @_;
 
 	return if $disable =~ /r/;
-
+# Get the directory entry or return an error. Then get the attribute.
 	my $entry = _entry($user); ref($entry) or return $entry;
-
+#get directory entry mi
 	my $mi = $entry->get_value('initials');
-
+#if new mi exist and new mi and old mi are not equal
 	if ($new_mi && $new_mi ne $mi) {
-
+#get user name
 		my $name = $user->{name};
-
+#logs in identity server new mi has been stored
 		Identity::log("store user $name mi $new_mi (was $mi)");
-
+#replace in directory entry
 		$entry->replace(initials => $new_mi);
-
+#continue if disable is false
 		return if $disable =~ /w/;
-
+#returns error on false and updates status
 		my $status = _update($entry); $status and
 			return Identity::log("error storing user $name mi: $status");
 	}
