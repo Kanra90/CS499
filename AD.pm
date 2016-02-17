@@ -370,21 +370,21 @@ sub disabled {
 	my ($user, $new_disabled) = @_;
 
 	if (defined($new_disabled)) {
-
+# return if regex results in match/contains 'r'
 		return if $disable =~ /r/;
 
 		my $entry = _entry($user); ref($entry) or return $entry;
 
 		my $control = $entry->get_value('userAccountControl');
-
+# replace user account control to hex 02 or -02 depending on if user account control 
 		$entry->replace(userAccountControl => $new_disabled ? $control | 0x02 : $control & ~0x02);
 
 		my $name = $user->{name};
-
+# set new disabled status
 		$new_disabled = $new_disabled ? 'T' : 'F';
 
 		Identity::log("store user $name disabled $new_disabled");
-
+# return if regex results in match/contains 'w'
 		return if $disable =~ /w/;
 
 		my $status = _update($entry); $status and
@@ -392,7 +392,7 @@ sub disabled {
 	}
 	return;
 }
-
+
 ######################################
 # Fetch date of last password change #
 ######################################
@@ -406,17 +406,16 @@ sub pwd_lastchange {
 	my $entry = _entry($user); ref($entry) or return $entry;
 
 	my $pwd_lastchange = $entry->get_value('pwdLastSet');
-
+# get last change or return no password
 	$pwd_lastchange or
 		return 'no password change attribute found';
-
+# reset last change
 	$pwd_lastchange =~ s/\d{7}$//;
 	$pwd_lastchange -= 134774 * 24 * 60 * 60;
 	$user->{pwd_lastchange} = $pwd_lastchange;
 
 	return;
 }
-
 #########################################
 # Store or fetch account lockout status #
 #########################################
@@ -432,18 +431,19 @@ sub lockout {
 
 	my $lockout_time = $entry->get_value('lockoutTime');
 
-	# No lockout time, not locked out, no need to unlock
+# No lockout time, not locked out, no need to unlock
 	$lockout_time or return;
-
+#strips additional figures from lockout time
 	$lockout_time =~ s/\d{7}$//;
+#subtracts init clock time
 	$lockout_time -= 134774 * 24 * 60 * 60;
 
-	# lockout already expired, not locked out, no need to unlock
+# lockout already expired, not locked out, no need to unlock
 	($lockout_time + $lockoutduration > time()) or return;
 
 	if ($unlock) {
 		Identity::log("store user $name lockout false");
-
+# reset lockout time
 		$entry->replace(lockoutTime => 0);
 
 		return if $disable =~ /w/;
@@ -460,7 +460,6 @@ sub lockout {
 
 	return;
 }
-
 #############################
 # Store password expiration #
 #############################
@@ -468,18 +467,19 @@ sub lockout {
 sub pwd_expired {
 
 	my ($user, $new_pwd_expired) = @_;
-
+# return if disabled
 	return if $disable =~ /r/;
 
 	my $entry = _entry($user); ref($entry) or return $entry;
 	my $name = $user->{name};
-
+# get last pastword set time
 	my $pwd_expired = ($entry->get_value('pwdLastSet') == 0) ? 'T' : 'F';
-
+# if defined, first check if expired
 	if (defined($new_pwd_expired)) {
 		$new_pwd_expired = $new_pwd_expired =~ /^[Tt1]$/ ? 'T' : 'F';
-
+# if dates not equal
 		if ($new_pwd_expired ne $pwd_expired) {
+# replace last password expiration with new
 			$entry->replace(pwdLastSet => ($new_pwd_expired eq 'T' ? 0 : -1));
 
 			Identity::log("store user $name pwd_expired $new_pwd_expired (was $pwd_expired)");
@@ -493,7 +493,6 @@ sub pwd_expired {
 
 	return;
 }
-
 #########################
 # Store user expiration #
 #########################
@@ -507,11 +506,12 @@ sub expiration {
 	my $entry = _entry($user); ref($entry) or return $entry;
 
 	my $expiration = $entry->get_value('accountExpires') || 0;
+#extends expiration date of password
 	if ($expiration) {
 		$expiration =~ s/\d{7}$//;
 		$expiration -= 134774 * 24 * 60 * 60;
 	}
-
+#check if new expiration is defined and not same as old expiration
 	if (defined($new_expiration) && $new_expiration != $expiration) {
 
 		$entry->replace(accountExpires => $new_expiration && ($new_expiration + (134774 * 24 * 60 * 60)) . '0000000');
@@ -530,7 +530,6 @@ sub expiration {
 	}
 	return;
 }
-
 ###########################
 # Store user or group fax #
 ###########################
@@ -544,14 +543,14 @@ sub fax {
 	my $entry = _entry($entity); ref($entry) or return $entry;
 
 	my $fax = $entry->get_value('facsimileTelephoneNumber', asref => 1);
-
+#Short circuit check to make sure new fax is a new number and not null
 	if ($new_fax and ($fax xor @$new_fax) || $fax->[0] ne $new_fax->[0]) {
 
 		my $name = $entity->{name};
 		my $type = $entity->{'-type'};
 
 		Identity::log("store $type $name fax $new_fax->[0] (was " . ($fax && $fax->[0]) . ')');
-
+#update fax at proper entry[]
 		$entry->replace(facsimileTelephoneNumber => @$new_fax ? $new_fax->[0] : []);
 
 		return if $disable =~ /w/;
@@ -561,7 +560,6 @@ sub fax {
 	}
 	return;
 }
-
 #########################################
 # Store or fetch user homedir (Windows) #
 #########################################
