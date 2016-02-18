@@ -364,13 +364,18 @@ sub department {
 #######################
 # Store user disabled #
 #######################
-
+# Returns status of disabled
+# Parameters: 
+# 1. User 
+# 2. New Disabled status, if applicable
+# Returns: 
+# T or F, depending if attempt to enable or disable successful
 sub disabled {
 
 	my ($user, $new_disabled) = @_;
 
 	if (defined($new_disabled)) {
-# return if regex results in match/contains 'r'
+# return if read disabled
 		return if $disable =~ /r/;
 
 		my $entry = _entry($user); ref($entry) or return $entry;
@@ -384,7 +389,7 @@ sub disabled {
 		$new_disabled = $new_disabled ? 'T' : 'F';
 
 		Identity::log("store user $name disabled $new_disabled");
-# return if regex results in match/contains 'w'
+# return if write disabled
 		return if $disable =~ /w/;
 
 		my $status = _update($entry); $status and
@@ -396,7 +401,11 @@ sub disabled {
 ######################################
 # Fetch date of last password change #
 ######################################
-
+# Returns date of last password change
+# Parameters: 
+# User
+# Returns: 
+# date of last password change
 sub pwd_lastchange {
 
 	my ($user) = @_;
@@ -419,6 +428,11 @@ sub pwd_lastchange {
 #########################################
 # Store or fetch account lockout status #
 #########################################
+# Returns status of lockout
+# Parameters: 
+# User, unlock hash
+# Returns: 
+# retirns lockout time
 sub lockout {
 
 	my ($user, $unlock) = @_;
@@ -463,11 +477,16 @@ sub lockout {
 #############################
 # Store password expiration #
 #############################
-
+# Returns status of password expiration
+# Parameters: 
+# 1. User
+# 2. New password expiration, if applicable
+# Returns:
+# T or F depending on status of password expiration
 sub pwd_expired {
 
 	my ($user, $new_pwd_expired) = @_;
-# return if disabled
+# return if read disabled
 	return if $disable =~ /r/;
 
 	my $entry = _entry($user); ref($entry) or return $entry;
@@ -483,7 +502,7 @@ sub pwd_expired {
 			$entry->replace(pwdLastSet => ($new_pwd_expired eq 'T' ? 0 : -1));
 
 			Identity::log("store user $name pwd_expired $new_pwd_expired (was $pwd_expired)");
-
+# return if write disabled
 			return if $disable =~ /w/;
 
 			my $status = _update($entry); $status and
@@ -496,7 +515,11 @@ sub pwd_expired {
 #########################
 # Store user expiration #
 #########################
-
+# Parameters: 
+# 1. User
+# 2. New password expiration, if applicable
+# Returns:
+# None
 sub expiration {
 
 	my ($user, $new_expiration) = @_;
@@ -533,7 +556,12 @@ sub expiration {
 ###########################
 # Store user or group fax #
 ###########################
-
+# Store or Fetch fax number
+# Parameters: 
+# 1. User
+# 2. new fax number, if applicable
+# Returns:
+# Updated fax $entry
 sub fax {
 
 	my ($entity, $new_fax) = @_;
@@ -563,7 +591,12 @@ sub fax {
 #########################################
 # Store or fetch user homedir (Windows) #
 #########################################
-
+# Store or Fetch User Homedir (windows)
+# Parameters: 
+# 1. User
+# 2. New homedir, if applicable
+# Returns:
+# T or F depending on status of password expiration
 sub homedir {
 
 	my ($user, $new_homedir) = @_;
